@@ -1,3 +1,5 @@
+#include <map>
+#include <deque>
 #ifndef COMMON_H
 #define COMMON_H
 
@@ -16,6 +18,10 @@ struct Order{
     int timestamp;
 };
 
+// Generate a random order around mid price in range defined by MAX_MID_DISTANCE
 Order generate_order(int mid_price);
+
+// Get best bid / ask from list of orders
+int get_best_price(bool side, std::map<int, std::deque<Order>> &orders);
 
 #endif

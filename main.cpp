@@ -20,7 +20,8 @@ int main(){
     for(int i = 0; 1; i ++){
 
         // Move mid price randomly by -1, 0, or 1
-        mid_price += mid_price > MAX_MID_DISTANCE ? rand() % 3 - 1 : 1;
+        // If negative move could lead to price < 1, move up
+        mid_price += mid_price - MAX_MID_DISTANCE - 1 > 0 ? rand() % 3 - 1 : 1;
 
         // Generate a random order
         Order new_order = generate_order(mid_price);
@@ -33,20 +34,16 @@ int main(){
             asks[new_order.price].push_back(new_order);
         }
 
-        // Get best bid / ask if they exist
-        int num_bids = bids.size();
-        int num_asks = asks.size();
-    
-        int best_bid, best_ask;
-        if(num_bids) best_bid = bids.rbegin()->second[0].price;
-        if(num_asks) best_ask = asks.begin()->second[0].price;
+        // Get best bid / ask
+        int best_bid = get_best_price(BUY, bids);
+        int best_ask = get_best_price(SELL, asks);
 
-        // Print spread
-        std::cout << "Bid " << (num_bids ? std::to_string(best_bid) : "None") << " | " << (num_asks ? std::to_string(best_ask) : "None") << " ask\n";
+        std::cout << best_bid << " | " << best_ask << "\n";
 
         // TODO: order filling
 
-        sleep(0.1);
+
+        sleep(0.0001);
     }
 
     return 0;
