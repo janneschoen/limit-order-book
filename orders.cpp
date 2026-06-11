@@ -3,7 +3,7 @@
 #include <map>
 #include <deque>
 
-Order generate_order(int mid_price){
+Order generate_order(unsigned mid_price){
     Order order;
     order.side = rand() % 2;
 
@@ -15,10 +15,9 @@ Order generate_order(int mid_price){
     return order;
 }
 
-int get_best_price(bool side, std::map<int, std::deque<Order>> &orders){
-    int num_orders = orders.size();
-    int best_price = 0;
-
+unsigned get_best_price(bool side, std::map<unsigned, std::deque<Order>> &orders){
+    unsigned num_orders = orders.size();
+    unsigned best_price = 0;
     if(num_orders){
         if(side == BUY){
             best_price = orders.rbegin()->second[0].price;

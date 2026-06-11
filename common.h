@@ -3,6 +3,7 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#define SLEEP_TIME 0.1     // Delay between loop iterations [s]
 #define MID_START 100       // Midpoint value at start of program
 #define MAX_MID_DISTANCE 30 // Maximal distance of order price to midpoint
 #define MAX_ORDER_QTY 10    // Maximal units one order can buy/sell
@@ -13,15 +14,14 @@
 
 struct Order{
     bool side;
-    int quantity;
+    unsigned quantity;
     unsigned price;
-    int timestamp;
 };
 
 // Generate a random order around mid price in range defined by MAX_MID_DISTANCE
-Order generate_order(int mid_price);
+Order generate_order(unsigned mid_price);
 
 // Get best bid / ask from list of orders
-int get_best_price(bool side, std::map<int, std::deque<Order>> &orders);
+unsigned get_best_price(bool side, std::map<unsigned, std::deque<Order>> &orders);
 
 #endif
