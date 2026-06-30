@@ -65,10 +65,11 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 │                                  │               │
 │                                  ▼               │
 │  ┌────────────────────────────────────────────┐  │
-│  │           Order Book (maps + deques)        │  │
+│  │      Order Book (sliding-window array)     │  │
 │  │  ┌──────────┐              ┌──────────┐    │  │
 │  │  │   BIDS   │              │   ASKS   │    │  │
-│  │  │ price→Q  │              │ price→Q  │    │  │
+│  │  │[0..255]  │              │[0..255]  │    │  │
+│  │  │ price−base│             │ price−base│   │  │
 │  │  └──────────┘              └──────────┘    │  │
 │  └──────────────────┬─────────────────────────┘  │
 │                     │                            │
@@ -91,7 +92,7 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 | File          | Purpose                                                   |
 |---------------|-----------------------------------------------------------|
 | `common.h`    | Data structures (`Order`, constants), function signatures |
-| `orders.cpp`  | Order generation (`generate_order`) and best-price lookup (`get_best_price`) |
+| `orders.cpp`  | Order generation (`generate_order`)                                                     |
 | `main.cpp`    | Market simulation loop, matching engine, I/O              |
 
 ---
@@ -100,33 +101,38 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 
 The choice of data structures is deliberate and reflects real-world exchange engineering tradeoffs.
 
-### `std::map<unsigned, std::deque<Order>>` — Per Side
+### Sliding-Window Flat Array — Per Side
+
+Instead of a red-black tree, each side of the book uses a pre-allocated flat array of deques with a sliding base offset:
 
 ```
-BIDS (price → FIFO queue of orders)
-────────────────────────────────────
-102  →  [O₁: +5,  O₂: +3,  O₃: +7]
-101  →  [O₄: +2]
- 99  →  [O₅: +4,  O₆: +1]
+BIDS (index = price - base, 256 slots)
+──────────────────────────────────────
+       base = 66          base + 128 (mid ≈ 194)
+       ↓                  ↓
+  [0]  [1] … [63] [64]   …   [191] [192] … [255]
+  empty          price=130      price=192
+                 [O₁, O₂]       [O₃]
 ```
 
-- **`std::map`** (red-black tree): `O(log N)` insertion and deletion per price level, `O(1)` to find extremes (`.begin()` / `.rbegin()`). Crucial because the matching engine repeatedly queries best bid/ask.
+- **Flat array** (`std::deque<Order>[WINDOW_SIZE]`): `O(1)` insertion, deletion, and price-level access. Finding the best price is a linear scan of contiguous memory — cache-friendly and branch-predictable. A cached `best_idx` avoids re-scanning the full window on every fill.
+- **Sliding base offset** (`base_price`): The window shifts when the mid-price drifts too close to an edge. Only active orders in the overlap region are relocated (a few dozen at most). The window is 4× the active range (`MAX_MID_DISTANCE * 2`), so recentering is infrequent.
 - **`std::deque`** per price level: `O(1)` push-back and pop-front. Enforces **price-time priority** — orders at the same price level are filled in arrival order (FIFO). This is exactly the convention used by Reg NMS-compliant US equity exchanges.
 
 ### Operation Complexities
 
 | Operation                          | Complexity        | Notes                                      |
 |------------------------------------|-------------------|--------------------------------------------|
-| Insert new order                   | `O(log P + 1)`    | `P` = distinct price levels                |
-| Get best bid / best ask            | `O(1)`            | `.rbegin()` / `.begin()` on red-black tree |
+| Insert new order                   | `O(1)`            | Direct array index via `price - base`      |
+| Get best bid / best ask (initial)  | `O(W)`            | `W` = WINDOW_SIZE (256, single scan/tick)  |
+| Get best bid / best ask (update)   | `O(1)` amortized  | Walk from cached index to next level       |
 | Fill (partial or complete)         | `O(1)`            | Decrement front of deque                   |
 | Remove fully-filled order          | `O(1)`            | `pop_front()` on deque                     |
-| Remove empty price level           | `O(log P)`        | `erase()` from map (amortized rare)        |
-| Single matching iteration          | `O(log P)`        | Dominated by erase of exhausted levels     |
+| Recenter window                    | `O(W)`            | Copy active orders to new positions (rare) |
 
 ### Memory
 
-Each `Order` is 12 bytes (1-byte `bool` + 4-byte `unsigned` + 4-byte `unsigned` + 3 bytes padding on typical LP64). The `std::deque` introduces per-block overhead, and the `std::map` node overhead is ~40 bytes per distinct price level. For a market with dozens of active price levels and hundreds of resting orders, total resident memory is measured in kilobytes.
+Each `Order` is 12 bytes (1-byte `bool` + 4-byte `unsigned` + 4-byte `unsigned` + 3 bytes padding on typical LP64). The `std::deque` introduces per-block overhead. Total resident memory per side: 256 deque objects (~80 bytes each) ≈ 20 KB. For both sides: ~40 KB — essentially nothing.
 
 ---
 
@@ -280,17 +286,15 @@ The engine maintains the following invariants at all times (between ticks):
 
 ## Performance
 
-The operation complexity analysis in [Data Structures & Complexity](#data-structures--complexity) tells the real story: every core operation is `O(1)` or `O(log P)` where `P` is the number of distinct price levels — typically a few dozen in this simulation. In practice, the engine is I/O bound: `std::cout` per tick dominates wall-clock time. If you remove the `sleep()` call and suppress output, the loop runs fast enough that `rand()` becomes the bottleneck.
+Every core operation is `O(1)` except the per-tick best-price scan (`O(WINDOW_SIZE)` = 256 iterations) and the rare window recentering. In practice, the engine is I/O bound: `std::cout` per tick dominates wall-clock time. If you remove the `sleep()` call and suppress output, the loop runs fast enough that `rand()` becomes the bottleneck.
 
-A natural next step for higher throughput would be replacing `std::map` with a flat array indexed directly by price, eliminating the `O(log P)` red-black tree overhead. But for a simulation throttled to 10 Hz by `SLEEP_TIME`, the current design is far more than adequate.
+The flat-array design eliminates red-black tree overhead entirely — no pointer-chasing cache misses on best-price lookups, no rebalancing on insert/delete. For a simulation throttled to 10 Hz by `SLEEP_TIME`, the current design is far more than adequate.
 
 ---
 
 ## What's Next
 
 - [ ] **TUI visualization.** A terminal-based live view of the order book — bid/ask ladder, spread, and recent fills — using a library like [FTXUI](https://github.com/ArthurSonzogni/FTXUI). Watching the book evolve in real time would make the market dynamics tangible in a way that numeric output alone doesn't.
-
-- [ ] **Flat-array price index.** Replace `std::map` with a pre-allocated array for `O(1)` price-level access. This is how production engines structure their books and would be a good exercise in trading off flexibility for speed.
 
 ---
 
