@@ -13,6 +13,7 @@
 // cache-friendly best-price scans, and eliminates red-black tree overhead.
 
 #include "common.h"
+#include <iomanip>
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -141,6 +142,9 @@ int main() {
     BookSide bids, asks;
     unsigned mid = MID_START;
 
+    std::cout << "  Bid │   Ask\n"
+              << "──────┼──────\n";
+
     for (;;) {
 
         // ── 1. Mid-price random walk ─────────────────────────
@@ -206,7 +210,13 @@ int main() {
         }
 
         // ── 5. Output ───────────────────────────────────────
-        std::cout << best_bid << " | " << best_ask << "\n";
+        auto fmt = [](unsigned p) -> std::string {
+            if (p == 0) return "  ---";
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%5u", p);
+            return buf;
+        };
+        std::cout << fmt(best_bid) << " │ " << fmt(best_ask) << "\n";
 
         sleep(SLEEP_TIME);
     }
