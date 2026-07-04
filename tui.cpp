@@ -271,12 +271,17 @@ int main() {
 
         Elements rows;
 
-        // Column header
+        // Column header — mirrors the data row layout so labels sit
+        // directly above the volume numbers, not the bars.
         rows.push_back(
             hbox({
-                text("      BIDS") | dim | color(Color::Green) | center,
-                text(" PRICE ") | dim | center,
-                text("ASKS      ") | dim | color(Color::Red) | center,
+                text(std::string(BAR_WIDTH, ' ')),    // placeholder for bid bars
+                text("BIDS") | dim | color(Color::Green),
+                text(" ") | dim,
+                text("PRICE") | dim,
+                text(" ") | dim,
+                text("ASKS") | dim | color(Color::Red),
+                text(std::string(BAR_WIDTH, ' ')),    // placeholder for ask bars
             }) | size(HEIGHT, EQUAL, 1));
 
         rows.push_back(separator());
