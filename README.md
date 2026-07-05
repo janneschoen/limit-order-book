@@ -15,10 +15,9 @@ A real-time limit order book (LOB) simulation that demonstrates the core mechani
 - [Matching Engine](#matching-engine)
 - [Market Dynamics](#market-dynamics)
 - [Build & Run](#build--run)
-- [Sample Output](#sample-output)
+- [TUI Visualization](#tui-visualization)
 - [Correctness Guarantees](#correctness-guarantees)
 - [Performance](#performance)
-- [TUI Visualization](#tui-visualization)
 - [Further Reading](#further-reading)
 
 ---
@@ -31,7 +30,7 @@ This project is a ground-up implementation of that central data structure, built
 
 - **Correctness first.** A single bad fill erodes trust in the entire venue. Every invariant is explicit and verifiable.
 - **Predictable, low-latency execution.** Data structure choices are deliberate and complexity-bounded.
-- **Minimal abstractions.** The engine and visualization fit in four files — easy to reason about, easy to debug.
+- **Minimal abstractions.** The entire engine and TUI fit in three source files (~580 lines) — easy to reason about, easy to debug.
 
 The goal is understanding how price-time priority matching works under the hood, with a codebase small enough to experiment on.
 
@@ -60,15 +59,14 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 ## Architecture
 
 ```
-┌─────────────────────┐    ┌─────────────────────────┐
-│      main.cpp       │    │        tui.cpp           │
-│   (console output)  │    │   (FTXUI DOM ladder)     │
-└─────────┬───────────┘    └───────────┬─────────────┘
-          │                            │
-          └──────────┬─────────────────┘
-                     ▼
-┌────────────────────────────────────────────────────┐
-│                  Simulation Core                    │
+┌──────────────────────────────────────────────────────┐
+│                     main.cpp                          │
+│              (FTXUI DOM ladder + tick loop)           │
+└───────────────────────┬──────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────┐
+│                  Simulation Core                      │
 │  ┌───────────────┐   ┌───────────────────────────┐ │
 │  │  Mid-Price RW │──▶│    Order Generation        │ │
 │  │ (MID_STEP_    │   │  generate_order(mid)       │ │
@@ -95,8 +93,7 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 │  └───────────────────────────────────────────────┘ │
 │                     │                              │
 │                     ▼                              │
-│     Output: console → best_bid | best_ask         │
-│             TUI     → DOM ladder + trade tape     │
+│     Output: DOM ladder, trade tape, keyboard UI  │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -104,10 +101,10 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 
 | File          | Lines | Purpose                                                   |
 |---------------|-------|-----------------------------------------------------------|
-| `common.h`    |  ~50  | Data structures (`Order`), constants, function signatures |
+| `common.h`    |  ~45  | Data structures (`Order`), constants, function signatures |
+| `book.cpp`    |  ~90  | Sliding-window book engine, best-price scans, recentering |
 | `orders.cpp`  |  ~35  | Order generation (`generate_order`, min-of-3 clustering)  |
-| `main.cpp`    | ~230  | Simulation loop, matching engine, console I/O             |
-| `tui.cpp`     | ~500  | FTXUI-based DOM ladder, trade tape, keyboard controls     |
+| `main.cpp`    | ~380  | Simulation loop, matching engine, FTXUI DOM ladder        |
 
 ---
 
@@ -194,7 +191,7 @@ while (
 
 3. **Greedy matching.** The loop continues until the book is completely uncrossed. An incoming order can fill against multiple price levels if it's large enough — this is standard market behavior (walking the book).
 
-4. **No explicit trade tape (console mode).** The console engine focuses on order state management and spread output. The TUI adds a rolling trade tape for visual feedback.
+4. **Rolling trade tape.** The TUI maintains a rolling log of the most recent fills, showing volume, price, aggressor direction, and tick number in a side panel.
 
 ---
 
@@ -239,12 +236,13 @@ New orders are generated each tick with:
 
 These parameters are tunable in `common.h`:
 ```c
-#define SLEEP_TIME       0.1   // seconds between iterations
 #define MID_START        100    // initial mid-price
 #define MID_STEP_EVERY   50     // ticks between mid-price random-walk steps
 #define MAX_MID_DISTANCE 30     // max offset from mid
 #define MAX_ORDER_QTY    10     // max order quantity
 ```
+
+TUI-specific settings (tick speed, visible levels, bar width) are at the top of `main.cpp`.
 
 By adjusting `MAX_MID_DISTANCE` relative to the random walk step size, you can control the ratio of aggressive vs. passive orders: a wide range means more orders land far from the mid and rest in the book (adding liquidity); a narrow range means most orders cross the spread immediately (taking liquidity).
 
@@ -256,56 +254,27 @@ By adjusting `MAX_MID_DISTANCE` relative to the random walk step size, you can c
 
 - **Compiler:** C++17 (GCC ≥ 7, Clang ≥ 5)
 - **Platform:** Linux, macOS, or WSL
-- **Dependencies (console):** C++ standard library only
-- **Dependencies (TUI):** [FTXUI](https://github.com/ArthurSonzogni/FTXUI)
+- **Dependencies:** [FTXUI](https://github.com/ArthurSonzogni/FTXUI)
 
 ### Build
 
 ```bash
-# Both binaries via Makefile
 make
+```
 
-# Console only
-make lob
+The Makefile expects FTXUI installed at `$(HOME)/.local`. Override with:
 
-# TUI only
-make lob-tui
-
-# Manual console build (no dependencies)
-g++ -std=c++17 -O2 -Wall -Wextra -o lob main.cpp orders.cpp
+```bash
+make FTXUI_DIR=/path/to/ftxui
 ```
 
 ### Run
 
 ```bash
-# Console mode — prints best_bid | best_ask per tick
 ./lob
-
-# TUI mode — interactive terminal visualization
-./lob-tui
 ```
 
-The console program prints one line per tick indefinitely. Press `Ctrl+C` to stop.
-The TUI mode opens a full interactive dashboard (see [TUI Visualization](#tui-visualization)).
-
----
-
-## Sample Output
-
-```
-  101 │   103
-  101 │   103
-  100 │   102
-   99 │   102
-   99 │   100
-   99 │    99      ← spread = 0: the book crossed and trades occurred
-   99 │    99
-   98 │   100
-   98 │    99      ← spread = 1: just crossed again
-   97 │    99
-   97 │   100
-  ...
-```
+Opens a full-screen interactive dashboard (see screenshot at top). Press `Q` to quit.
 
 When `best_bid ≥ best_ask`, the matching engine fills aggressively and the spread collapses to (or near) zero for that tick. In the next tick, new orders arrive and the spread typically widens again. Over time, the spread hovers around `MAX_MID_DISTANCE`, reflecting the balance between order arrival rate and fill aggressiveness.
 
@@ -313,7 +282,7 @@ When `best_bid ≥ best_ask`, the matching engine fills aggressively and the spr
 
 ## TUI Visualization
 
-The TUI (`lob-tui`) renders a real-time Depth-of-Market (DOM) ladder powered by [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
+The program renders a real-time Depth-of-Market (DOM) ladder powered by [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
 
 ### Features
 
@@ -335,15 +304,7 @@ The TUI (`lob-tui`) renders a real-time Depth-of-Market (DOM) ladder powered by 
 | `<` / `,`  | Slow down (increase tick interval) |
 | `R`        | Reset (clear book, restart mid)  |
 
-### Build
-
-Requires [FTXUI](https://github.com/ArthurSonzogni/FTXUI) (the Makefile expects it at the path defined by `FTXUI_DIR`):
-
-```bash
-make lob-tui
-```
-
-The matching engine and order generation are shared with the console binary — the TUI is purely a visualization layer over the same simulation core.
+The matching engine (`book.cpp`), order generation (`orders.cpp`), and TUI rendering (`main.cpp`) are cleanly separated — the visualization layer observes the same book state that the engine maintains.
 
 ---
 
@@ -365,9 +326,9 @@ The engine maintains the following invariants at all times (between ticks):
 
 ## Performance
 
-Every core operation is `O(1)` except the per-tick best-price scan (`O(WINDOW_SIZE)` = 256 iterations) and the rare window recentering. In practice, the engine is I/O bound: `std::cout` per tick dominates wall-clock time. If you remove the `sleep()` call and suppress output, the loop runs fast enough that `rand()` becomes the bottleneck.
+Every core operation is `O(1)` except the per-tick best-price scan (`O(WINDOW_SIZE)` = 256 iterations) and the rare window recentering. The TUI rendering and tick-speed throttle (default 100 ms) dominate wall-clock time — the matching engine itself runs fast enough that `rand()` becomes the bottleneck.
 
-The flat-array design eliminates red-black tree overhead entirely — no pointer-chasing cache misses on best-price lookups, no rebalancing on insert/delete. For a simulation throttled to 10 Hz by `SLEEP_TIME`, the current design is far more than adequate.
+The flat-array design eliminates red-black tree overhead entirely — no pointer-chasing cache misses on best-price lookups, no rebalancing on insert/delete. For a simulation throttled to 10 ticks/sec, the current design is far more than adequate.
 
 ---
 
