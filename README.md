@@ -3,7 +3,7 @@
 A real-time limit order book (LOB) simulation that demonstrates the core mechanics of modern electronic exchanges: continuous double-auction price discovery, price-time priority matching, and order-driven market microstructure.
 
 <p align="center">
-  <img src="screenshots/screenshot.png" alt="LOB TUI Screenshot" width="700">
+  <img src="screenshots/tui-overview.png" alt="LOB TUI Screenshot" width="700">
 </p>
 
 ## Table of Contents
