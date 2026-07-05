@@ -2,6 +2,10 @@
 
 A real-time limit order book (LOB) simulation that demonstrates the core mechanics of modern electronic exchanges: continuous double-auction price discovery, price-time priority matching, and order-driven market microstructure.
 
+<p align="center">
+  <img src="screenshots/tui-overview.png" alt="LOB TUI Screenshot" width="700">
+</p>
+
 ## Table of Contents
 
 - [Why This Project?](#why-this-project)
@@ -11,10 +15,9 @@ A real-time limit order book (LOB) simulation that demonstrates the core mechani
 - [Matching Engine](#matching-engine)
 - [Market Dynamics](#market-dynamics)
 - [Build & Run](#build--run)
-- [Sample Output](#sample-output)
+- [TUI Visualization](#tui-visualization)
 - [Correctness Guarantees](#correctness-guarantees)
 - [Performance](#performance)
-- [What's Next](#whats-next)
 - [Further Reading](#further-reading)
 
 ---
@@ -27,7 +30,7 @@ This project is a ground-up implementation of that central data structure, built
 
 - **Correctness first.** A single bad fill erodes trust in the entire venue. Every invariant is explicit and verifiable.
 - **Predictable, low-latency execution.** Data structure choices are deliberate and complexity-bounded.
-- **Minimal abstractions.** The entire engine fits in three files and ~150 lines — easy to reason about, easy to debug.
+- **Minimal abstractions.** The entire engine and TUI fit in three source files (~580 lines) — easy to reason about, easy to debug.
 
 The goal is understanding how price-time priority matching works under the hood, with a codebase small enough to experiment on.
 
@@ -56,44 +59,52 @@ The **spread** (`best_ask − best_bid`) is the fundamental measure of liquidity
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                    main.cpp                      │
-│  ┌───────────────┐   ┌───────────────────────┐  │
-│  │  Mid-Price RW │──▶│   Order Generation     │  │
-│  │  (random walk) │   │  generate_order(mid)  │  │
-│  └───────────────┘   └───────────┬───────────┘  │
-│                                  │               │
-│                                  ▼               │
-│  ┌────────────────────────────────────────────┐  │
-│  │      Order Book (sliding-window array)     │  │
-│  │  ┌──────────┐              ┌──────────┐    │  │
-│  │  │   BIDS   │              │   ASKS   │    │  │
-│  │  │[0..255]  │              │[0..255]  │    │  │
-│  │  │ price−base│             │ price−base│   │  │
-│  │  └──────────┘              └──────────┘    │  │
-│  └──────────────────┬─────────────────────────┘  │
-│                     │                            │
-│                     ▼                            │
-│  ┌────────────────────────────────────────────┐  │
-│  │          Matching Engine Loop               │  │
-│  │  while (best_bid ≥ best_ask):               │  │
-│  │    fill_vol = min(bid_qty, ask_qty)         │  │
-│  │    decrement both → remove if empty         │  │
-│  │    recalc best_bid / best_ask              │  │
-│  └────────────────────────────────────────────┘  │
-│                     │                            │
-│                     ▼                            │
-│         Output: best_bid | best_ask              │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                     main.cpp                          │
+│              (FTXUI DOM ladder + tick loop)           │
+└───────────────────────┬──────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────┐
+│                  Simulation Core                      │
+│  ┌───────────────┐   ┌───────────────────────────┐ │
+│  │  Mid-Price RW │──▶│    Order Generation        │ │
+│  │ (MID_STEP_    │   │  generate_order(mid)       │ │
+│  │  EVERY ticks) │   │  (min-of-3 clustered)      │ │
+│  └───────────────┘   └───────────┬───────────────┘ │
+│                                  │                  │
+│                                  ▼                  │
+│  ┌───────────────────────────────────────────────┐ │
+│  │        Order Book (sliding-window array)      │ │
+│  │  ┌──────────┐                ┌──────────┐     │ │
+│  │  │   BIDS   │                │   ASKS   │     │ │
+│  │  │[0..255]  │                │[0..255]  │     │ │
+│  │  │price−base│                │price−base│     │ │
+│  │  └──────────┘                └──────────┘     │ │
+│  └──────────────────┬────────────────────────────┘ │
+│                     │                              │
+│                     ▼                              │
+│  ┌───────────────────────────────────────────────┐ │
+│  │           Matching Engine Loop                │ │
+│  │  while (best_bid ≥ best_ask):                 │ │
+│  │    fill_vol = min(bid_qty, ask_qty)           │ │
+│  │    decrement both → remove if empty           │ │
+│  │    recalc best_bid / best_ask via cached idx  │ │
+│  └───────────────────────────────────────────────┘ │
+│                     │                              │
+│                     ▼                              │
+│     Output: DOM ladder, trade tape, keyboard UI  │
+└────────────────────────────────────────────────────┘
 ```
 
 ### Source Files
 
-| File          | Purpose                                                   |
-|---------------|-----------------------------------------------------------|
-| `common.h`    | Data structures (`Order`, constants), function signatures |
-| `orders.cpp`  | Order generation (`generate_order`)                                                     |
-| `main.cpp`    | Market simulation loop, matching engine, I/O              |
+| File          | Lines | Purpose                                                   |
+|---------------|-------|-----------------------------------------------------------|
+| `common.h`    |  ~45  | Data structures (`Order`), constants, function signatures |
+| `book.cpp`    |  ~90  | Sliding-window book engine, best-price scans, recentering |
+| `orders.cpp`  |  ~35  | Order generation (`generate_order`, min-of-3 clustering)  |
+| `main.cpp`    | ~380  | Simulation loop, matching engine, FTXUI DOM ladder        |
 
 ---
 
@@ -145,26 +156,30 @@ while (
     best_bid && best_ask &&  // both sides have resting orders
     best_bid >= best_ask     // the book is crossed
 ) {
+    int bid_i = bids.best_idx;
+    int ask_i = asks.best_idx;
+
     unsigned fill_vol = std::min(
-        bids[best_bid][0].quantity,
-        asks[best_ask][0].quantity
+        bids.levels[bid_i][0].quantity,
+        asks.levels[ask_i][0].quantity
     );
 
     // Execute the fill
-    bids[best_bid][0].quantity   -= fill_vol;
-    asks[best_ask][0].quantity   -= fill_vol;
+    bids.levels[bid_i][0].quantity -= fill_vol;
+    asks.levels[ask_i][0].quantity -= fill_vol;
 
-    // Garbage-collect filled orders and empty levels
-    if (bids[best_bid][0].quantity == 0) {
-        bids[best_bid].pop_front();
-        if (bids[best_bid].empty())
-            bids.erase(best_bid);
+    // Garbage-collect filled orders
+    if (bids.levels[bid_i][0].quantity == 0) {
+        bids.levels[bid_i].pop_front();
+        update_best_bid(bids);        // walk to next occupied slot
     }
-    // ... symmetric for asks ...
+    // ... symmetric for asks with update_best_ask() ...
 
     // Recalculate extremes for next iteration
-    best_bid = get_best_price(BUY,  bids);
-    best_ask = get_best_price(SELL, asks);
+    best_bid = (bids.best_idx >= 0)
+        ? (unsigned)(base_price + bids.best_idx) : 0U;
+    best_ask = (asks.best_idx >= 0)
+        ? (unsigned)(base_price + asks.best_idx) : 0U;
 }
 ```
 
@@ -176,7 +191,7 @@ while (
 
 3. **Greedy matching.** The loop continues until the book is completely uncrossed. An incoming order can fill against multiple price levels if it's large enough — this is standard market behavior (walking the book).
 
-4. **No explicit trade tape.** The engine focuses on order state management and spread output. A production system would additionally emit trade messages to a matching feed.
+4. **Rolling trade tape.** The TUI maintains a rolling log of the most recent fills, showing volume, price, aggressor direction, and tick number in a side panel.
 
 ---
 
@@ -190,22 +205,44 @@ The mid-price follows a constrained random walk:
 mid_price ∈ {mid_price - 1,  mid_price,  mid_price + 1}
 ```
 
-A floor prevents the mid-price from falling below `MAX_MID_DISTANCE + 2` (enforcing that `price ≥ 1` for all generated orders). This creates a plausible — if simplified — model of a market where the "fair value" drifts over time while orders cluster around it.
+A floor prevents the mid-price from falling below `MAX_MID_DISTANCE + 1` (enforcing that all generated order prices are positive — no zero or negative prices can enter the book). This creates a plausible — if simplified — model of a market where the "fair value" drifts over time while orders cluster around it.
 
 ### Order Generation
 
 New orders are generated each tick with:
 - **Side:** 50/50 buy or sell (Bernoulli trial)
 - **Quantity:** Uniform random in `[1, MAX_ORDER_QTY]`
-- **Price:** Uniform random in `[mid − MAX_MID_DISTANCE,  mid + MAX_MID_DISTANCE]`
+- **Price:** Non-uniform, clustered around the mid via **min-of-3 uniforms**:
+
+  ```
+  offset = min(U₁, U₂, U₃)         where Uᵢ ~ Uniform[0, MAX_MID_DISTANCE)
+  ```
+
+  This concentrates probability mass near zero:
+
+  | Offset ≤ | Probability |
+  |----------|-------------|
+  | D × ⅓    | ~70%        |
+  | D × ½    | ~88%        |
+  | D × ⅔    | ~96%        |
+  | D        | 100%        |
+
+  A uniform distribution would place too many orders at the extremes, constantly sweeping away inner liquidity and producing a permanently wide spread. Clustering around the mid creates realistic book depth:
+
+<p align="center">
+  <img src="screenshots/order-distribution.png" alt="Order distribution skewing toward the mid-price" width="650">
+  <br><em>Ask-side volume sloping upward — the closer to the mid, the more resting orders. This clustering around the best price is typical of real markets, where traders compete for queue priority at the tightest levels.</em>
+</p>
 
 These parameters are tunable in `common.h`:
 ```c
-#define SLEEP_TIME       0.1   // seconds between iterations
 #define MID_START        100    // initial mid-price
+#define MID_STEP_EVERY   50     // ticks between mid-price random-walk steps
 #define MAX_MID_DISTANCE 30     // max offset from mid
 #define MAX_ORDER_QTY    10     // max order quantity
 ```
+
+TUI-specific settings (tick speed, visible levels, bar width) are at the top of `main.cpp`.
 
 By adjusting `MAX_MID_DISTANCE` relative to the random walk step size, you can control the ratio of aggressive vs. passive orders: a wide range means more orders land far from the mid and rest in the book (adding liquidity); a narrow range means most orders cross the spread immediately (taking liquidity).
 
@@ -215,20 +252,20 @@ By adjusting `MAX_MID_DISTANCE` relative to the random walk step size, you can c
 
 ### Requirements
 
-- **Compiler:** Any C++11-compatible compiler (GCC ≥ 4.8, Clang ≥ 3.3)
+- **Compiler:** C++17 (GCC ≥ 7, Clang ≥ 5)
 - **Platform:** Linux, macOS, or WSL
-- **Dependencies:** None beyond the C++ standard library
+- **Dependencies:** [FTXUI](https://github.com/ArthurSonzogni/FTXUI)
 
 ### Build
 
 ```bash
-g++ -std=c++11 -O2 -Wall -Wextra -o lob main.cpp orders.cpp
+make
 ```
 
-For a debug build with assertions and address sanitizer:
+The Makefile expects FTXUI installed at `$(HOME)/.local`. Override with:
 
 ```bash
-g++ -std=c++11 -g -O0 -fsanitize=address -Wall -Wextra -o lob_debug main.cpp orders.cpp
+make FTXUI_DIR=/path/to/ftxui
 ```
 
 ### Run
@@ -237,34 +274,37 @@ g++ -std=c++11 -g -O0 -fsanitize=address -Wall -Wextra -o lob_debug main.cpp ord
 ./lob
 ```
 
-The program runs indefinitely, printing one line per tick:
+Opens a full-screen interactive dashboard (see screenshot at top). Press `Q` to quit.
 
-```
-best_bid | best_ask
-```
-
-Press `Ctrl+C` to stop.
+When `best_bid ≥ best_ask`, the matching engine fills aggressively and the spread collapses to (or near) zero for that tick. In the next tick, new orders arrive and the spread typically widens again. Over time, the spread hovers around `MAX_MID_DISTANCE`, reflecting the balance between order arrival rate and fill aggressiveness.
 
 ---
 
-## Sample Output
+## TUI Visualization
 
-```
-101 | 103
-101 | 103
-100 | 102
-99 | 102
-99 | 100
-99 | 99      ← spread = 0: the book crossed and trades occurred
-99 | 99
-98 | 100
-98 | 99      ← spread = 1: just crossed again
-97 | 99
-97 | 100
-...
-```
+The program renders a real-time Depth-of-Market (DOM) ladder powered by [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
 
-When `best_bid ≥ best_ask`, the matching engine fills aggressively and the spread collapses to (or near) zero for that tick. In the next tick, new orders arrive and the spread typically widens again. Over time, the spread hovers around `MAX_MID_DISTANCE`, reflecting the balance between order arrival rate and fill aggressiveness.
+### Features
+
+- **Price ladder** — vertical price column centered on the mid-price, with descending prices (high → low).
+- **Bid bars (left)** — green horizontal bars showing resting buy volume at each price level. Bars fill from right to left (toward the center).
+- **Ask bars (right)** — red horizontal bars showing resting sell volume at each level. Bars fill from left to right (toward the center).
+- **Header** — live mid-price, spread, best bid/ask, tick counter, and cumulative fill count.
+- **Trade tape (right panel)** — rolling log of recent fills, showing volume, price, aggressor direction (↑ buy, ↓ sell), and tick number.
+- **Volume normalization** — bars scale relative to the largest visible level so the book always looks active.
+- **Color highlights** — green for best bid, red for best ask, yellow for prices within the spread.
+
+### Keyboard Controls
+
+| Key        | Action                          |
+|------------|---------------------------------|
+| `Q`        | Quit                            |
+| `P`        | Pause / resume simulation       |
+| `>` / `.`  | Speed up (reduce tick interval) |
+| `<` / `,`  | Slow down (increase tick interval) |
+| `R`        | Reset (clear book, restart mid)  |
+
+The matching engine (`book.cpp`), order generation (`orders.cpp`), and TUI rendering (`main.cpp`) are cleanly separated — the visualization layer observes the same book state that the engine maintains.
 
 ---
 
@@ -278,23 +318,17 @@ The engine maintains the following invariants at all times (between ticks):
 
 3. **Non-negative quantities.** Orders are removed from the book only when `quantity == 0` (after a decrement operation). Partial fills reduce the quantity; the order remains in the book for the remainder.
 
-4. **No dangling empty levels.** After the last order at a price level is filled, the `erase()` call removes the map entry. This keeps `orders.size()` accurate and prevents stale iterators.
+4. **No stale best-price pointers.** After a fill empties the best level, `update_best_bid()` / `update_best_ask()` walk to the next occupied slot in `O(1)` amortized time. Empty deques don't need explicit removal — they're zero-cost in the fixed array.
 
-5. **Price bounds.** Order prices are always in `[1, mid + MAX_MID_DISTANCE]`, and the mid-price is constrained to prevent underflow. No zero or negative prices can enter the book.
+5. **Price bounds.** Order prices are always within `mid ± MAX_MID_DISTANCE`, and the mid-price is constrained to prevent underflow. No zero or negative prices can enter the book.
 
 ---
 
 ## Performance
 
-Every core operation is `O(1)` except the per-tick best-price scan (`O(WINDOW_SIZE)` = 256 iterations) and the rare window recentering. In practice, the engine is I/O bound: `std::cout` per tick dominates wall-clock time. If you remove the `sleep()` call and suppress output, the loop runs fast enough that `rand()` becomes the bottleneck.
+Every core operation is `O(1)` except the per-tick best-price scan (`O(WINDOW_SIZE)` = 256 iterations) and the rare window recentering. The TUI rendering and tick-speed throttle (default 100 ms) dominate wall-clock time — the matching engine itself runs fast enough that `rand()` becomes the bottleneck.
 
-The flat-array design eliminates red-black tree overhead entirely — no pointer-chasing cache misses on best-price lookups, no rebalancing on insert/delete. For a simulation throttled to 10 Hz by `SLEEP_TIME`, the current design is far more than adequate.
-
----
-
-## What's Next
-
-- [ ] **TUI visualization.** A terminal-based live view of the order book — bid/ask ladder, spread, and recent fills — using a library like [FTXUI](https://github.com/ArthurSonzogni/FTXUI). Watching the book evolve in real time would make the market dynamics tangible in a way that numeric output alone doesn't.
+The flat-array design eliminates red-black tree overhead entirely — no pointer-chasing cache misses on best-price lookups, no rebalancing on insert/delete. For a simulation throttled to 10 ticks/sec, the current design is far more than adequate.
 
 ---
 
@@ -305,4 +339,4 @@ The flat-array design eliminates red-black tree overhead entirely — no pointer
 
 ---
 
-*Built with C++11.*
+*Built with C++17.*
