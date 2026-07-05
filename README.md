@@ -208,7 +208,7 @@ The mid-price follows a constrained random walk:
 mid_price ∈ {mid_price - 1,  mid_price,  mid_price + 1}
 ```
 
-A floor prevents the mid-price from falling below `MAX_MID_DISTANCE + 2` (enforcing that `price ≥ 1` for all generated orders). This creates a plausible — if simplified — model of a market where the "fair value" drifts over time while orders cluster around it.
+A floor prevents the mid-price from falling below `MAX_MID_DISTANCE + 1` (enforcing that all generated order prices are positive — no zero or negative prices can enter the book). This creates a plausible — if simplified — model of a market where the "fair value" drifts over time while orders cluster around it.
 
 ### Order Generation
 
@@ -225,9 +225,9 @@ New orders are generated each tick with:
 
   | Offset ≤ | Probability |
   |----------|-------------|
-  | D × ⅓    | ~58%        |
-  | D × ½    | ~75%        |
-  | D × ⅔    | ~88%        |
+  | D × ⅓    | ~70%        |
+  | D × ½    | ~88%        |
+  | D × ⅔    | ~96%        |
   | D        | 100%        |
 
   A uniform distribution would place too many orders at the extremes, constantly sweeping away inner liquidity and producing a permanently wide spread. Clustering around the mid creates realistic book depth:
@@ -293,18 +293,18 @@ The TUI mode opens a full interactive dashboard (see [TUI Visualization](#tui-vi
 ## Sample Output
 
 ```
-101 | 103
-101 | 103
-100 | 102
-99 | 102
-99 | 100
-99 | 99      ← spread = 0: the book crossed and trades occurred
-99 | 99
-98 | 100
-98 | 99      ← spread = 1: just crossed again
-97 | 99
-97 | 100
-...
+  101 │   103
+  101 │   103
+  100 │   102
+   99 │   102
+   99 │   100
+   99 │    99      ← spread = 0: the book crossed and trades occurred
+   99 │    99
+   98 │   100
+   98 │    99      ← spread = 1: just crossed again
+   97 │    99
+   97 │   100
+  ...
 ```
 
 When `best_bid ≥ best_ask`, the matching engine fills aggressively and the spread collapses to (or near) zero for that tick. In the next tick, new orders arrive and the spread typically widens again. Over time, the spread hovers around `MAX_MID_DISTANCE`, reflecting the balance between order arrival rate and fill aggressiveness.
@@ -359,7 +359,7 @@ The engine maintains the following invariants at all times (between ticks):
 
 4. **No stale best-price pointers.** After a fill empties the best level, `update_best_bid()` / `update_best_ask()` walk to the next occupied slot in `O(1)` amortized time. Empty deques don't need explicit removal — they're zero-cost in the fixed array.
 
-5. **Price bounds.** Order prices are always in `[1, mid + MAX_MID_DISTANCE]`, and the mid-price is constrained to prevent underflow. No zero or negative prices can enter the book.
+5. **Price bounds.** Order prices are always within `mid ± MAX_MID_DISTANCE`, and the mid-price is constrained to prevent underflow. No zero or negative prices can enter the book.
 
 ---
 

@@ -11,8 +11,8 @@
 //
 // We take the minimum of 3 independent uniform randoms in [0, MAX_MID_DISTANCE).
 // This concentrates probability mass near zero:
-//   P(offset ≤ D*1/3) ≈ 58%       P(offset ≤ D*2/3) ≈ 88%
-//   P(offset ≤ D*1/2) ≈ 75%       P(offset ≤ D)     = 100%
+//   P(offset ≤ D*1/3) ≈ 70%       P(offset ≤ D*2/3) ≈ 96%
+//   P(offset ≤ D*1/2) ≈ 88%       P(offset ≤ D)     = 100%
 //
 // Without this, a uniform distribution causes the outer tail to constantly
 // sweep away inner liquidity, producing a permanently wide spread.

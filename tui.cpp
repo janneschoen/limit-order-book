@@ -476,7 +476,7 @@ int main() {
                     Fill f;
                     f.price      = best_bid;
                     f.volume     = fill_qty;
-                    f.taker_side = (fill_count % 2 == 0) ? BUY : SELL;
+                    f.taker_side = o.side;
                     f.tick       = tick;
                     tape.push_back(f);
                     if ((int)tape.size() > TAPE_LENGTH * 2)
