@@ -1,7 +1,7 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -g
 
-FTXUI_DIR := /home/js/.cache/yay/ftxui/FTXUI-7.0.0
+FTXUI_DIR ?= /usr/local
 FTXUI_INC := -I$(FTXUI_DIR)/include
 FTXUI_LIB := -L$(FTXUI_DIR)/build -lftxui-component -lftxui-dom -lftxui-screen
 

@@ -9,9 +9,21 @@
 
 #include <deque>
 
-// Simulation parameters
+// Simulation parameters (tunable)
+//
+// SLEEP_TIME       — seconds between ticks (console mode)
+// MID_START        — initial mid-price
+// MID_STEP_EVERY   — how many ticks between mid-price random-walk steps.
+//                    Higher = slower mid drift, letting resting liquidity
+//                    build up visibly near the spread.
+// MAX_MID_DISTANCE — max offset of an order from mid.
+//                    With min-of-3 distribution in orders.cpp,
+//                    ~58% of orders land within D/3 of mid, producing a
+//                    tight visible spread.
+// MAX_ORDER_QTY    — max quantity per order (uniform in [1, MAX_ORDER_QTY])
 #define SLEEP_TIME       0.1   // seconds between ticks
 #define MID_START        100   // initial mid-price
+#define MID_STEP_EVERY   50     // update mid every N ticks
 #define MAX_MID_DISTANCE 30    // max offset of an order's price from the mid
 #define MAX_ORDER_QTY    10    // max quantity per order
 

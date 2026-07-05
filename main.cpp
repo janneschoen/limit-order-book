@@ -148,11 +148,16 @@ int main() {
     for (;;) {
 
         // ── 1. Mid-price random walk ─────────────────────────
-        // Step by -1, 0, or +1, but never let the mid drop so low
-        // that generated prices could go below 1.
-        mid += (mid - MAX_MID_DISTANCE - 1 > 0)
-                   ? (unsigned)(rand() % 3 - 1)
-                   : 1U;
+        // Step by -1, 0, or +1 every MID_STEP_EVERY ticks, to
+        // give resting liquidity time to build visibly near the
+        // spread (never let mid drop below MAX_MID_DISTANCE+1).
+        static unsigned step_ctr = 0;
+        if (++step_ctr >= MID_STEP_EVERY) {
+            step_ctr = 0;
+            mid += (mid - MAX_MID_DISTANCE - 1 > 0)
+                       ? (unsigned)(rand() % 3 - 1)
+                       : 1U;
+        }
 
         // ── 2. Recenter the window if needed ────────────────
         // Shift base when the mid is within 25% of either edge so

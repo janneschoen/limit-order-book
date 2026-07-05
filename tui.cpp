@@ -427,9 +427,15 @@ int main() {
             tick++;
 
             // --- 1. Mid-price random walk ---
-            mid += (mid - MAX_MID_DISTANCE - 1 > 0)
-                       ? (unsigned)(rand() % 3 - 1)
-                       : 1U;
+            // Step every MID_STEP_EVERY ticks so resting
+            // liquidity builds up visibly near the spread.
+            static unsigned step_ctr = 0;
+            if (++step_ctr >= MID_STEP_EVERY) {
+                step_ctr = 0;
+                mid += (mid - MAX_MID_DISTANCE - 1 > 0)
+                           ? (unsigned)(rand() % 3 - 1)
+                           : 1U;
+            }
 
             // --- 2. Recenter window if needed ---
             int rel = (int)mid - base_price;
