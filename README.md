@@ -3,7 +3,7 @@
 A real-time limit order book (LOB) simulation that demonstrates the core mechanics of modern electronic exchanges: continuous double-auction price discovery, price-time priority matching, and order-driven market microstructure.
 
 <p align="center">
-  <img src="screenshot.png" alt="LOB TUI Screenshot" width="700">
+  <img src="screenshots/screenshot.png" alt="LOB TUI Screenshot" width="700">
 </p>
 
 ## Table of Contents
@@ -233,7 +233,7 @@ New orders are generated each tick with:
   A uniform distribution would place too many orders at the extremes, constantly sweeping away inner liquidity and producing a permanently wide spread. Clustering around the mid creates realistic book depth:
 
 <p align="center">
-  <img src="order-distribution.png" alt="Order distribution skewing toward the mid-price" width="650">
+  <img src="screenshots/order-distribution.png" alt="Order distribution skewing toward the mid-price" width="650">
   <br><em>Ask-side volume sloping upward — the closer to the mid, the more resting orders. This clustering around the best price is typical of real markets, where traders compete for queue priority at the tightest levels.</em>
 </p>
 
